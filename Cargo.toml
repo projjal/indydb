@@ -1,0 +1,10 @@
+[package]
+name = "indydb"
+version = "0.1.0"
+authors = ["projjal <iam@pchanda.com>"]
+edition = "2018"
+
+[dependencies]
+byteorder = "1"
+num-traits = "0.2"
+num-derive = "0.2"
