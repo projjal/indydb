@@ -136,3 +136,9 @@ impl DB {
         Ok(())
     }
 }
+
+impl Drop for DB {
+    fn drop(&mut self) {
+        self.close().expect("Failed to safely close the db");
+    }
+}
