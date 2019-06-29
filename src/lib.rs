@@ -1,10 +1,10 @@
 extern crate byteorder;
 
-mod db;
+pub mod db;
+pub mod params;
 mod errors;
 mod memtable;
 mod table;
-mod params;
 
 pub use db::DB;
 pub use params::DBParams;

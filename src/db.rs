@@ -99,12 +99,7 @@ impl DB {
     }
 
     pub fn close(&mut self) -> Result<()> {
-        let flush_thread_handle_option = self.flush_thread_handle.take();
-        if let Some(_flush_thread_handle) = flush_thread_handle_option {
-            if let Err(_) = _flush_thread_handle.join() {
-                return Err(Error::BackgroundFlushError);
-            }
-        };
+        self.start_flushing()?;
         Ok(())
     }
 
@@ -116,6 +111,9 @@ impl DB {
             }
             self.files += 1;
         };
+        if self.mem_table.table.is_empty() {
+            return Ok(());
+        }
         let old_mem_table = std::mem::replace(&mut self.mem_table, MemTable::new());
         self.flush_table = Arc::new(Some(old_mem_table));
         let _flush_table = Arc::clone(&self.flush_table);
@@ -128,7 +126,7 @@ impl DB {
                 }
                 _table_builder.flush().unwrap();
                 let mut num_files = Vec::with_capacity(8);
-                num_files.write_u64::<BigEndian>(_table_builder.file_no()).unwrap();
+                num_files.write_u64::<BigEndian>(_table_builder.file_no() + 1).unwrap();
                 File::create(format!("{}/METADATA",_db_name)).unwrap().write_all(&num_files).unwrap();
             }
         });
