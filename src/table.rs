@@ -19,9 +19,9 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub fn new(db_name: String, file_no: u64) -> TableBuilder {
+    pub fn new(db_name: &str, file_no: u64) -> TableBuilder {
         TableBuilder {
-            db_name: db_name,
+            db_name: String::from(db_name),
             file_no: file_no,
             data: Vec::new(),
             index: Vec::new(),
@@ -55,6 +55,12 @@ impl TableBuilder {
     pub fn flush(&mut self) -> Result<()>{
         File::create(format!("{}/{}.dt",self.db_name, self.file_no))?.write_all(&self.data)?;
         File::create(format!("{}/{}.ix",self.db_name, self.file_no))?.write_all(&self.index)?;
+        
+        // reset data after flush
+        self.data.clear();
+        self.index.clear();
+        self.offset = 0;
+        self.file_no += 1;
         Ok(())
     }
 
