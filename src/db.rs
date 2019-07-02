@@ -180,6 +180,11 @@ impl DB {
     }
 
     pub fn close(&mut self) -> Result<()> {
+        // db already closed
+        if self.flush_thread_handle.is_none() {
+            return Ok(())
+        }
+
         self.start_flushing()?;
 
         {
@@ -213,7 +218,7 @@ impl DB {
             return Ok(());
         }
         
-        // wait till the flush thread has not finished flushing the last flush_table
+        // wait till the flush thread has finished flushing the last flush_table
         {
             let &(ref lock, ref cvar) = &*self.cv_pair;
             let mut to_flush = lock.lock()?;
@@ -238,5 +243,11 @@ impl DB {
             cvar.notify_one();
         }
         Ok(())
+    }
+}
+
+impl Drop for DB {
+    fn drop(&mut self) {
+        self.close().expect("Failed to safely close the db");
     }
 }

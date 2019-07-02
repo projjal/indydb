@@ -24,7 +24,7 @@ mod tests {
     #[test]
     fn test_db_open() {
         let db_params = DBParams::new();
-        let db_name = "target/testdb";
+        let db_name = "target/testdb1";
         let mut db = DB::open(&db_name, db_params).unwrap();
         db.put("test", "value").unwrap();
         let val = db.get("test").unwrap().unwrap();
@@ -36,7 +36,7 @@ mod tests {
     #[test]
     fn test_db_get_and_put() {
         let db_params = DBParams::new();
-        let db_name = "target/testdb";
+        let db_name = "target/testdb2";
         let mut db = DB::open(&db_name, db_params).unwrap();
 
         for i in 0..100 {
