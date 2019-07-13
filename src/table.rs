@@ -10,6 +10,8 @@ use num_traits::FromPrimitive;
 use crate::errors::{Error, Result};
 use crate::memtable::MemValue;
 
+// Table builder builds the on-disk log files
+// Corresponding to each memtable two log files - data table and index table - are generated
 pub struct TableBuilder {
     db_name: String,
     file_no: u64,
@@ -29,6 +31,7 @@ impl TableBuilder {
         }
     }
 
+    // Adds the key and value marker (delete or data offset) to the index table and actual value to the data table
     pub fn add(&mut self, key: &[u8], value: &MemValue) -> Result<()> {
         self.index.append(&mut self.encode(key)?);
         self.index.push(value.encode());
@@ -45,6 +48,7 @@ impl TableBuilder {
         Ok(())
     }
 
+    // encodes data to on-disk format - <data len><data bytes>
     fn encode(&self, data: &[u8]) -> Result<Vec<u8>>{
         let mut vec = Vec::with_capacity(8 + data.len());
         vec.write_u64::<BigEndian>(data.len() as u64)?;
@@ -52,6 +56,7 @@ impl TableBuilder {
         Ok(vec)
     }
 
+    // flushes to log files in the disk
     pub fn flush(&mut self) -> Result<()>{
         File::create(format!("{}/{}.dt",self.db_name, self.file_no))?.write_all(&self.data)?;
         File::create(format!("{}/{}.ix",self.db_name, self.file_no))?.write_all(&self.index)?;
@@ -69,6 +74,7 @@ impl TableBuilder {
     }
 }
 
+// Delete marker or offset to the data table 
 enum IndexValue {
     Offset(u64),
     Delete
@@ -81,13 +87,17 @@ enum MemValueCode {
     Delete = 1u8
 }
 
+// In-memory Index table corresponding to a particular log file
 pub struct Table {
     db_name: String,
+    // log number of the index table
     file_no: u64,
+    // index maps key to an IndexValue, which is either a delete marker or an offset to corresponding data table
     index: HashMap<Vec<u8>,IndexValue>,
 }
 
 impl Table {
+    // loads the index table into memory
     pub fn open(db_name: &str, file_no: u64) -> Result<Table> {
         let mut f = File::open(format!("{}/{}.ix",db_name, file_no))?;
         let mut index_buf = Vec::new();
@@ -126,6 +136,9 @@ impl Table {
         })
     }
 
+    // Returns the value corresponding to the key from the data table
+    // Either the key corresponds to a delete marker (meaning the key is deleted)
+    // or it corresponds to data table offset in which case the value is returned
     pub fn get(&self, key: &[u8]) -> Result<Option<MemValue>> {
         let value = self.index.get(key);
         match value {

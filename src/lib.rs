@@ -2,7 +2,7 @@ extern crate byteorder;
 
 pub mod db;
 pub mod params;
-mod errors;
+pub mod errors;
 mod memtable;
 mod table;
 

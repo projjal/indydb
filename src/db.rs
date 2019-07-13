@@ -26,19 +26,30 @@ macro_rules! get_mem_value {
 }
 
 pub struct DB {
+    /// Name of the db
     db_name : String,
+    /// In-memory table for storing key-value pairs.
+    /// After mem_table reaches a specified size it is converted into flush_table
     mem_table : MemTable,
+    /// Immutable table to be flushed to disk
     flush_table : Arc<RwLock<Option<MemTable>>>,
+    /// DBParams object to tune the behaviour of the db
     db_params : DBParams,
-    files : Arc<RwLock<u64>>, 
+    /// Number of log files belonging to the db.
+    /// Contains log files numbered form 0 to <files-1>
+    files : Arc<RwLock<u64>>,
+    /// Join-handle of the background flush thread that flushes flush_table to disk
     flush_thread_handle : Option<JoinHandle<Result<()>>>,
+    /// Condition Variable for synchronizing the flush_thread with the db thread, which waits till the flush_thread has finished flushing before converting the current mem_table to flush_table
     cv_pair : Arc<(Mutex<bool>, Condvar)>,
+    /// Sender part of the channel that signals the flush_thread that db is closing
     flush_thread_sender : Sender<()>,
 }
 
 impl DB {
+    /// Opens and loads a database
     pub fn open(db_name : &str, db_params: DBParams) -> Result<DB> {
-        let num_files = DB::create_db_dir(db_name)?;
+        let num_files = DB::num_log_files(db_name, &db_params)?;
         let _db_name = String::from(db_name);
         let _flush_table = Arc::new(RwLock::new(None));
         let _cv_pair = Arc::new((Mutex::new(false), Condvar::new()));
@@ -59,7 +70,8 @@ impl DB {
         Ok(db)
     }
 
-    fn create_db_dir(db_name: &str) -> Result<u64> {
+    // returns the number of log_files in the database
+    fn num_log_files(db_name: &str, db_params: &DBParams) -> Result<u64> {
         let path = Path::new(db_name);
         let is_path_exists = path.exists();
         let num_files = if is_path_exists && path.is_dir() {
@@ -70,11 +82,16 @@ impl DB {
             } else {
                 return Err(Error::DBNameInvalidError);
             }
-        } else if is_path_exists {
+        } else if is_path_exists { // not a directory
             return Err(Error::DBNameInvalidError);
         } else {
-            fs::create_dir_all(db_name)?;
-            0
+            if db_params.create_if_missing {
+                fs::create_dir_all(db_name)?;
+                0
+            } else {
+                return Err(Error::DBNameInvalidError);
+            }
+            
         };
         Ok(num_files)
     }
@@ -141,6 +158,7 @@ impl DB {
         Ok(thread_handle)
     }
 
+    /// Returns the value corresponding to the key
     pub fn get<S: Into<Vec<u8>>>(&self, key : S) -> Result<Option<Vec<u8>>> {
         let key_bytes = key.into();
         get_mem_value!(self.mem_table.get(&key_bytes));
@@ -163,6 +181,8 @@ impl DB {
         Ok(None)
     }
 
+    /// Insertes a key-value pair to the database.
+    /// If key was already present the value is updated.
     pub fn put<S: Into<Vec<u8>>>(&mut self, key: S, value: S) -> Result<()> {
         self.mem_table.put(key.into(), value.into())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
@@ -171,6 +191,7 @@ impl DB {
         Ok(())
     }
 
+    /// Deletes a key from the database
     pub fn delete<S: Into<Vec<u8>>>(&mut self, key: S) -> Result<()> {
         self.mem_table.delete(key.into())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
@@ -179,12 +200,15 @@ impl DB {
         Ok(())
     }
 
+    /// Safely closes the database
+    /// Returns after finishing the background flush thread.
     pub fn close(&mut self) -> Result<()> {
         // db already closed
         if self.flush_thread_handle.is_none() {
             return Ok(())
         }
 
+        // flush the mem_table since db is closing
         self.start_flushing()?;
 
         {
@@ -195,7 +219,7 @@ impl DB {
             }
         }
 
-
+        // signal the background thread to finish and close
         self.flush_thread_sender.send(())?;
 
         {
@@ -213,12 +237,13 @@ impl DB {
         Ok(())
     }
 
+    // converts the mem_table to flush_table and signals the background flush_thread to start flushing
     fn start_flushing(&mut self) -> Result<()> {
         if self.mem_table.table.is_empty() {
             return Ok(());
         }
         
-        // wait till the flush thread has finished flushing the last flush_table
+        // wait if the flush thread has not finished flushing the last flush_table
         {
             let &(ref lock, ref cvar) = &*self.cv_pair;
             let mut to_flush = lock.lock()?;
