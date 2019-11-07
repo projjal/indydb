@@ -166,8 +166,8 @@ impl DB {
     }
 
     /// Returns the value corresponding to the key
-    pub fn get<S: Into<Vec<u8>>>(&self, key: S) -> Result<Option<Vec<u8>>> {
-        let key_bytes = key.into();
+    pub fn get<S: AsRef<[u8]>>(&self, key: S) -> Result<Option<Vec<u8>>> {
+        let key_bytes = key.as_ref();
         get_mem_value!(self.mem_table.get(&key_bytes));
 
         {
@@ -190,8 +190,8 @@ impl DB {
 
     /// Insertes a key-value pair to the database.
     /// If key was already present the value is updated.
-    pub fn put<S: Into<Vec<u8>>>(&mut self, key: S, value: S) -> Result<()> {
-        self.mem_table.put(key.into(), value.into())?;
+    pub fn put<S: AsRef<[u8]>>(&mut self, key: S, value: S) -> Result<()> {
+        self.mem_table.put(key.as_ref(), value.as_ref())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
             self.start_flushing()?;
         }
@@ -199,8 +199,8 @@ impl DB {
     }
 
     /// Deletes a key from the database
-    pub fn delete<S: Into<Vec<u8>>>(&mut self, key: S) -> Result<()> {
-        self.mem_table.delete(key.into())?;
+    pub fn delete<S: AsRef<[u8]>>(&mut self, key: S) -> Result<()> {
+        self.mem_table.delete(key.as_ref())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
             self.start_flushing()?;
         }

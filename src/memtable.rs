@@ -33,15 +33,15 @@ impl MemTable {
         self.table.get(key)
     }
 
-    pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         self.size += key.len() + value.len();
-        self.table.insert(key, MemValue::Value(value));
+        self.table.insert(key.to_vec(), MemValue::Value(value.to_vec()));
         Ok(())
     }
 
-    pub fn delete(&mut self, key: Vec<u8>) -> Result<()> {
+    pub fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.size += key.len();
-        self.table.insert(key, MemValue::Delete);
+        self.table.insert(key.to_vec(), MemValue::Delete);
         Ok(())
     }
 
