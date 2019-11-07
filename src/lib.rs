@@ -1,21 +1,20 @@
 extern crate byteorder;
 
 pub mod db;
-pub mod params;
 pub mod errors;
 mod memtable;
+pub mod params;
 mod table;
 
 pub use db::DB;
-pub use params::DBParams;
 pub use errors::{Error, Result};
-
+pub use params::DBParams;
 
 #[cfg(test)]
 mod tests {
     use crate::db::DB;
     use crate::params::DBParams;
-    use std::{str, fs};
+    use std::{fs, str};
 
     fn delete_db(db_name: &str) {
         fs::remove_dir_all(db_name).unwrap();

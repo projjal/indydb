@@ -1,7 +1,7 @@
-use std::result;
 use std::io;
-use std::sync::PoisonError;
+use std::result;
 use std::sync::mpsc::SendError;
+use std::sync::PoisonError;
 
 #[derive(Debug)]
 pub enum Error {
@@ -14,22 +14,21 @@ pub enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from (err: io::Error) -> Error {
+    fn from(err: io::Error) -> Error {
         Error::IOError(err)
     }
 }
 
 impl<T> From<PoisonError<T>> for Error {
-    fn from (_err: PoisonError<T>) -> Error {
+    fn from(_err: PoisonError<T>) -> Error {
         Error::SyncPoisonError
     }
 }
 
 impl<T> From<SendError<T>> for Error {
-    fn from (_err: SendError<T>) -> Error {
+    fn from(_err: SendError<T>) -> Error {
         Error::SendError
     }
 }
-
 
 pub type Result<T> = result::Result<T, Error>;

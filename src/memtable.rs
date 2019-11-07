@@ -4,7 +4,7 @@ use crate::errors::Result;
 
 pub enum MemValue {
     Value(Vec<u8>),
-    Delete
+    Delete,
 }
 
 impl MemValue {
@@ -17,7 +17,7 @@ impl MemValue {
 }
 
 pub struct MemTable {
-    pub table : HashMap<Vec<u8>, MemValue>,
+    pub table: HashMap<Vec<u8>, MemValue>,
     size: usize,
 }
 
@@ -25,11 +25,11 @@ impl MemTable {
     pub fn new() -> MemTable {
         MemTable {
             table: HashMap::new(),
-            size: 0
+            size: 0,
         }
     }
 
-    pub fn get(&self, key: &Vec<u8>) -> Option<&MemValue> {
+    pub fn get(&self, key: &[u8]) -> Option<&MemValue> {
         self.table.get(key)
     }
 
