@@ -10,6 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 
+use crate::cache::LRUCache;
 use crate::errors::{Error, Result};
 use crate::memtable::{MemTable, MemValue};
 use crate::params::DBParams;
@@ -35,8 +36,10 @@ pub struct DB {
     flush_table: Arc<RwLock<Option<MemTable>>>,
     /// DBParams object to tune the behaviour of the db
     db_params: DBParams,
+    /// LRU cache that caches the table structures
+    cache: LRUCache<u64, Table>,
     /// Number of log files belonging to the db.
-    /// Contains log files numbered form 0 to <files-1>
+    /// DB contains log files numbered form 0 to <files-1>
     files: Arc<RwLock<u64>>,
     /// Join-handle of the background flush thread that flushes flush_table to disk
     flush_thread_handle: Option<JoinHandle<Result<()>>>,
@@ -51,7 +54,9 @@ impl DB {
     pub fn open(db_name: &str, db_params: DBParams) -> Result<DB> {
         let num_files = DB::num_log_files(db_name, &db_params)?;
         let db_name = String::from(db_name);
+        let mem_table = MemTable::new();
         let flush_table = Arc::new(RwLock::new(None));
+        let cache = LRUCache::new(db_params.cache_size);
         let cv_pair = Arc::new((Mutex::new(false), Condvar::new()));
         let files = Arc::new(RwLock::new(num_files));
         let (sender, receiver) = mpsc::channel();
@@ -65,9 +70,10 @@ impl DB {
 
         let db = DB {
             db_name,
-            mem_table: MemTable::new(),
+            mem_table,
             flush_table,
             db_params,
+            cache,
             files,
             flush_thread_handle: Some(join_handle),
             cv_pair,
@@ -166,7 +172,7 @@ impl DB {
     }
 
     /// Returns the value corresponding to the key
-    pub fn get<S: AsRef<[u8]>>(&self, key: S) -> Result<Option<Vec<u8>>> {
+    pub fn get<S: AsRef<[u8]>>(&mut self, key: S) -> Result<Option<Vec<u8>>> {
         let key_bytes = key.as_ref();
         get_mem_value!(self.mem_table.get(&key_bytes));
 
@@ -180,9 +186,15 @@ impl DB {
         {
             let guard = self.files.read()?;
             for i in 0..*guard {
-                let table = Table::open(&self.db_name, *guard - i - 1)?;
-                let val = table.get(&key_bytes)?;
-                get_mem_value!(val);
+                if let Some(table) = self.cache.get(&(*guard - i - 1)) {
+                    let val = table.get(&key_bytes)?;
+                    get_mem_value!(val);
+                } else {
+                    let table = Table::open(&self.db_name, *guard - i - 1)?;
+                    let val = table.get(&key_bytes)?;
+                    self.cache.put(*guard - i - 1, table);
+                    get_mem_value!(val);
+                };
             }
         }
         Ok(None)

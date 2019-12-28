@@ -1,5 +1,6 @@
 extern crate byteorder;
 
+mod cache;
 pub mod db;
 pub mod errors;
 mod memtable;
@@ -34,7 +35,8 @@ mod tests {
 
     #[test]
     fn test_db_get_and_put() {
-        let db_params = DBParams::new();
+        let mut db_params = DBParams::new();
+        db_params.write_buffer_size = 16;
         let db_name = "target/testdb2";
         let mut db = DB::open(&db_name, db_params).unwrap();
 

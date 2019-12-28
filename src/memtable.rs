@@ -35,7 +35,8 @@ impl MemTable {
 
     pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         self.size += key.len() + value.len();
-        self.table.insert(key.to_vec(), MemValue::Value(value.to_vec()));
+        self.table
+            .insert(key.to_vec(), MemValue::Value(value.to_vec()));
         Ok(())
     }
 
