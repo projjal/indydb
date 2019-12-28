@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::marker::Copy;
 use std::mem;
-use std::mem::MaybeUninit;
 use std::ptr;
 
 struct RawLink<T> {
@@ -93,10 +92,10 @@ impl<K: Hash + Eq, V> LRUCache<K, V> {
             map: HashMap::with_capacity(cap),
             cap,
             head: RawLink {
-                p: MaybeUninit::<LRUEntry<K, V>>::uninit().as_mut_ptr(),
+                p: unsafe { Box::into_raw(Box::new(mem::uninitialized::<LRUEntry<K, V>>())) },
             },
             tail: RawLink {
-                p: MaybeUninit::<LRUEntry<K, V>>::uninit().as_mut_ptr(),
+                p: unsafe { Box::into_raw(Box::new(mem::uninitialized::<LRUEntry<K, V>>())) },
             },
         };
 
@@ -111,7 +110,6 @@ impl<K: Hash + Eq, V> LRUCache<K, V> {
         Q: Hash + Eq + ?Sized,
     {
         if let Some(entry) = self.map.get_mut(key) {
-            // let entry_ptr : *mut LRUEntry<K, V> = &mut **entry;
             let entry_ptr = RawLink::some(&mut **entry);
             self.detach(entry_ptr);
             self.attach(entry_ptr);
@@ -183,4 +181,28 @@ impl<T> RawLink<T> {
     fn resolve_mut(&mut self) -> &mut T {
         unsafe { &mut *self.p }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LRUCache;
+    use std::fmt::Debug;
+
+    fn assert_opt_eq<V: PartialEq + Debug>(opt: Option<&V>, v: V) {
+        assert!(opt.is_some());
+        assert_eq!(opt.unwrap(), &v);
+    }
+
+    #[test]
+    fn test_put_and_get(){
+        let mut cache = LRUCache::new(10);
+
+        assert_eq!(cache.put("hello", "world"), None);
+        assert_eq!(cache.put("lorem", "ipsum"), None);
+
+        assert_opt_eq(cache.get(&"hello"), "world");
+        assert_opt_eq( cache.get(&"lorem"), "ipsum");
+        assert!(cache.get(&"paris").is_none());
+    }
+
 }
