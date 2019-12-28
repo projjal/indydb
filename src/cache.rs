@@ -92,10 +92,10 @@ impl<K: Hash + Eq, V> LRUCache<K, V> {
             map: HashMap::with_capacity(cap),
             cap,
             head: RawLink {
-                p: unsafe { Box::into_raw(Box::new(mem::uninitialized::<LRUEntry<K, V>>())) },
+                p: unsafe { Box::into_raw(Box::new(mem::MaybeUninit::<LRUEntry<K, V>>::uninit().assume_init())) },
             },
             tail: RawLink {
-                p: unsafe { Box::into_raw(Box::new(mem::uninitialized::<LRUEntry<K, V>>())) },
+                p: unsafe { Box::into_raw(Box::new(mem::MaybeUninit::<LRUEntry<K, V>>::uninit().assume_init())) },
             },
         };
 
