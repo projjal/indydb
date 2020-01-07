@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use chashmap::CHashMap;
 
 use crate::errors::Result;
 
+#[derive(Clone)]
 pub enum MemValue {
     Value(Vec<u8>),
     Delete,
@@ -17,36 +18,42 @@ impl MemValue {
 }
 
 pub struct MemTable {
-    pub table: HashMap<Vec<u8>, MemValue>,
-    size: usize,
+    pub table: CHashMap<Vec<u8>, MemValue>,
 }
 
 impl MemTable {
     pub fn new() -> MemTable {
         MemTable {
-            table: HashMap::new(),
-            size: 0,
+            table: CHashMap::new(),
         }
     }
 
-    pub fn get(&self, key: &[u8]) -> Option<&MemValue> {
-        self.table.get(key)
+    pub fn get(&self, key: &[u8]) -> Option<MemValue> {
+        self.table.get(key).map(|guard| (*guard).clone())
     }
 
-    pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.size += key.len() + value.len();
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         self.table
             .insert(key.to_vec(), MemValue::Value(value.to_vec()));
         Ok(())
     }
 
-    pub fn delete(&mut self, key: &[u8]) -> Result<()> {
-        self.size += key.len();
+    pub fn delete(&self, key: &[u8]) -> Result<()> {
         self.table.insert(key.to_vec(), MemValue::Delete);
         Ok(())
     }
 
     pub fn size(&self) -> usize {
-        self.size
+        self.table.len()
+    }
+
+    pub fn  is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+
+    pub fn clear(&self) -> MemTable {
+        MemTable {
+            table: self.table.clear(),
+        }
     }
 }

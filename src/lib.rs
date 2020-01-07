@@ -25,7 +25,7 @@ mod tests {
     fn test_db_open() {
         let db_params = DBParams::new();
         let db_name = "target/testdb1";
-        let mut db = DB::open(&db_name, db_params).unwrap();
+        let db = DB::open(&db_name, db_params).unwrap();
         db.put("test", "value").unwrap();
         let val = db.get("test").unwrap().unwrap();
         assert_eq!(str::from_utf8(&val).unwrap(), "value");
@@ -38,7 +38,7 @@ mod tests {
         let mut db_params = DBParams::new();
         db_params.write_buffer_size = 16;
         let db_name = "target/testdb2";
-        let mut db = DB::open(&db_name, db_params).unwrap();
+        let db = DB::open(&db_name, db_params).unwrap();
 
         for i in 0..100 {
             db.put(i.to_string(), i.to_string()).unwrap();

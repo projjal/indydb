@@ -6,6 +6,7 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
@@ -19,7 +20,7 @@ use crate::table::{Table, TableBuilder};
 macro_rules! get_mem_value {
     ($e:expr) => {
         match $e {
-            Some(MemValue::Value(value)) => return Ok(Some(value.clone())),
+            Some(MemValue::Value(value)) => return Ok(Some(value)),
             Some(MemValue::Delete) => return Ok(None),
             _ => (),
         };
@@ -37,12 +38,12 @@ pub struct DB {
     /// DBParams object to tune the behaviour of the db
     db_params: DBParams,
     /// LRU cache that caches the table structures
-    cache: LRUCache<u64, Table>,
+    cache: Arc<RwLock<LRUCache<u64, Table>>>,
     /// Number of log files belonging to the db.
     /// DB contains log files numbered form 0 to <files-1>
-    files: Arc<RwLock<u64>>,
+    files: Arc<AtomicU64>,
     /// Join-handle of the background flush thread that flushes flush_table to disk
-    flush_thread_handle: Option<JoinHandle<Result<()>>>,
+    flush_thread_handle: Arc<RwLock<Option<JoinHandle<Result<()>>>>>,
     /// Condition Variable for synchronizing the flush_thread with the db thread, which waits till the flush_thread has finished flushing before converting the current mem_table to flush_table
     cv_pair: Arc<(Mutex<bool>, Condvar)>,
     /// Sender part of the channel that signals the flush_thread that db is closing
@@ -56,10 +57,10 @@ impl DB {
         let db_name = String::from(db_name);
         let mem_table = MemTable::new();
         let flush_table = Arc::new(RwLock::new(None));
-        let cache = LRUCache::new(db_params.cache_size);
+        let cache = Arc::new(RwLock::new(LRUCache::new(db_params.cache_size)));
         let cv_pair = Arc::new((Mutex::new(false), Condvar::new()));
-        let files = Arc::new(RwLock::new(num_files));
-        let (sender, receiver) = mpsc::channel();
+        let files = Arc::new(AtomicU64::new(num_files));
+        let (flush_thread_sender, receiver) = mpsc::channel();
         let join_handle = DB::start_flush_thread(
             receiver,
             db_name.clone(),
@@ -67,6 +68,7 @@ impl DB {
             cv_pair.clone(),
             files.clone(),
         )?;
+        let flush_thread_handle = Arc::new(RwLock::new(Some(join_handle)));
 
         let db = DB {
             db_name,
@@ -75,9 +77,9 @@ impl DB {
             db_params,
             cache,
             files,
-            flush_thread_handle: Some(join_handle),
+            flush_thread_handle,
             cv_pair,
-            flush_thread_sender: sender,
+            flush_thread_sender,
         };
         Ok(db)
     }
@@ -111,14 +113,11 @@ impl DB {
         db_name: String,
         flush_table: Arc<RwLock<Option<MemTable>>>,
         cv_pair: Arc<(Mutex<bool>, Condvar)>,
-        db_files: Arc<RwLock<u64>>,
+        db_files: Arc<AtomicU64>,
     ) -> Result<JoinHandle<Result<()>>> {
         // background flush thread
         let thread_handle = thread::spawn(move || {
-            let files = {
-                let guard = db_files.read()?;
-                *guard
-            };
+            let files = db_files.load(Ordering::SeqCst);
             let mut _table_builder = TableBuilder::new(&db_name, files);
             loop {
                 let &(ref lock, ref cvar) = &*cv_pair;
@@ -135,10 +134,10 @@ impl DB {
                 };
 
                 {
-                    let guard = flush_table.read()?;
-                    if let Some(ref inner_table) = *guard {
-                        for (key, value) in &inner_table.table {
-                            _table_builder.add(key, value)?;
+                    let table = (flush_table.write()?).take();
+                    if let Some(inner_table) = table {
+                        for (key, value) in inner_table.table.into_iter() {
+                            _table_builder.add(&key, &value)?;
                         }
                         _table_builder.flush()?;
 
@@ -153,13 +152,8 @@ impl DB {
                             .unwrap();
 
                         // update num_files property of db
-                        let mut w_guard = db_files.write()?;
-                        *w_guard += 1;
+                        db_files.fetch_add(1, Ordering::SeqCst);
                     }
-                }
-                {
-                    let mut guard = flush_table.write()?;
-                    *guard = None;
                 }
 
                 *to_flush = false;
@@ -172,7 +166,7 @@ impl DB {
     }
 
     /// Returns the value corresponding to the key
-    pub fn get<S: AsRef<[u8]>>(&mut self, key: S) -> Result<Option<Vec<u8>>> {
+    pub fn get<S: AsRef<[u8]>>(&self, key: S) -> Result<Option<Vec<u8>>> {
         let key_bytes = key.as_ref();
         get_mem_value!(self.mem_table.get(&key_bytes));
 
@@ -183,26 +177,25 @@ impl DB {
             }
         }
 
-        {
-            let guard = self.files.read()?;
-            for i in 0..*guard {
-                if let Some(table) = self.cache.get(&(*guard - i - 1)) {
-                    let val = table.get(&key_bytes)?;
-                    get_mem_value!(val);
-                } else {
-                    let table = Table::open(&self.db_name, *guard - i - 1)?;
-                    let val = table.get(&key_bytes)?;
-                    self.cache.put(*guard - i - 1, table);
-                    get_mem_value!(val);
-                };
-            }
+        let num_files = self.files.load(Ordering::SeqCst);
+        for i in 0..num_files {
+            let mut guard = self.cache.write()?;
+            if let Some(table) = guard.get(&(num_files - i - 1)) {
+                let val = table.get(&key_bytes)?;
+                get_mem_value!(val);
+            } else {
+                let table = Table::open(&self.db_name, num_files - i - 1)?;
+                let val = table.get(&key_bytes)?;
+                guard.put(num_files - i - 1, table);
+                get_mem_value!(val);
+            };
         }
         Ok(None)
     }
 
     /// Insertes a key-value pair to the database.
     /// If key was already present the value is updated.
-    pub fn put<S: AsRef<[u8]>>(&mut self, key: S, value: S) -> Result<()> {
+    pub fn put<S: AsRef<[u8]>>(&self, key: S, value: S) -> Result<()> {
         self.mem_table.put(key.as_ref(), value.as_ref())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
             self.start_flushing()?;
@@ -211,7 +204,7 @@ impl DB {
     }
 
     /// Deletes a key from the database
-    pub fn delete<S: AsRef<[u8]>>(&mut self, key: S) -> Result<()> {
+    pub fn delete<S: AsRef<[u8]>>(&self, key: S) -> Result<()> {
         self.mem_table.delete(key.as_ref())?;
         if self.mem_table.size() >= self.db_params.write_buffer_size {
             self.start_flushing()?;
@@ -221,9 +214,9 @@ impl DB {
 
     /// Safely closes the database
     /// Returns after finishing the background flush thread.
-    pub fn close(&mut self) -> Result<()> {
+    pub fn close(&self) -> Result<()> {
         // db already closed
-        if self.flush_thread_handle.is_none() {
+        if (self.flush_thread_handle.read()?).is_none() {
             return Ok(());
         }
 
@@ -249,7 +242,7 @@ impl DB {
         }
 
         // join the flush_thread_handle
-        let join_handle = self.flush_thread_handle.take();
+        let join_handle = (self.flush_thread_handle.write()?).take();
         if join_handle.unwrap().join().is_err() {
             return Err(Error::BackgroundFlushError);
         }
@@ -257,8 +250,8 @@ impl DB {
     }
 
     // converts the mem_table to flush_table and signals the background flush_thread to start flushing
-    fn start_flushing(&mut self) -> Result<()> {
-        if self.mem_table.table.is_empty() {
+    fn start_flushing(&self) -> Result<()> {
+        if self.mem_table.is_empty() {
             return Ok(());
         }
 
@@ -272,11 +265,10 @@ impl DB {
         }
 
         // replace the memtable with a new one and convert it to the flush_table
-        let old_mem_table = std::mem::replace(&mut self.mem_table, MemTable::new());
         {
             let mut w_guard = self.flush_table.write()?;
             assert!(w_guard.is_none(), "flush_table is not none");
-            *w_guard = Some(old_mem_table);
+            *w_guard = Some(self.mem_table.clear());
         }
 
         // signal the flush_thread to start flushing
